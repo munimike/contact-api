@@ -1,100 +1,97 @@
-import { google } from 'googleapis';
-import { GoogleAuth } from 'google-auth-library';
-
-// Node.js (Vercel serverless) — Google Sheets via service account (JWT)
+// api/contact.js
 const { google } = require('googleapis');
-const ALLOWED_ORIGINS = ['https://www.mnmkstudio.com']; // add your live site(s)
 
+function corsOrigin(req) {
+  const origin = req.headers.origin || '';
+  const allowed = (process.env.ALLOWED_ORIGIN || '*')
+    .split(',')
+    .map(s => s.trim());
+  if (allowed.includes('*') || allowed.includes(origin)) return origin || '*';
+  // fall back to first allowed so browser can see headers
+  return allowed[0] || '*';
+}
 function send(res, status, body, origin) {
-  res.setHeader('Access-Control-Allow-Origin', origin || '*');
+  res.setHeader('Access-Control-Allow-Origin', origin);
+  res.setHeader('Vary', 'Origin');
   res.setHeader('Access-Control-Allow-Methods', 'POST,OPTIONS');
   res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
+  res.setHeader('Access-Control-Max-Age', '86400');
   res.status(status).json(body);
 }
 
 module.exports = async (req, res) => {
-  const ORIGIN = process.env.ALLOWED_ORIGIN || '*';
+  const origin = corsOrigin(req);
 
-  // CORS preflight
-  if (req.method === 'OPTIONS') return send(res, 204, {}, ORIGIN);
-  if (req.method !== 'POST') return send(res, 405, { error: 'Only POST allowed' }, ORIGIN);
+  // Preflight
+  if (req.method === 'OPTIONS') return send(res, 204, {}, origin);
+  if (req.method !== 'POST') return send(res, 405, { error: 'Only POST allowed' }, origin);
 
   try {
-    const body = req.body || {};
-    if (body.test === true) {
-      return send(res, 200, { status: 'ok', note: 'test mode' }, ORIGIN);
+    // ----- ENV CHECKS -------------------------------------------------------
+    const spreadsheetId = process.env.GOOGLE_SHEET_ID;
+    if (!spreadsheetId) {
+      console.error('Missing env: GOOGLE_SHEET_ID');
+      return send(res, 500, { error: 'Internal error' }, origin);
+    }
+    const clientEmail = process.env.GOOGLE_SERVICE_ACCOUNT_EMAIL;
+    let privateKey = process.env.GOOGLE_PRIVATE_KEY || '';
+    // convert \n escapes to real newlines
+    privateKey = privateKey.replace(/\\n/g, '\n');
+    if (!clientEmail || !privateKey) {
+      console.error('Missing env: GOOGLE_SERVICE_ACCOUNT_EMAIL or GOOGLE_PRIVATE_KEY');
+      return send(res, 500, { error: 'Internal error' }, origin);
     }
 
-    // --- ENV VARS you must set in Vercel ---
-    const spreadsheetId   = process.env.GOOGLE_SHEET_ID;        // the Contact sheet id
-    const sheetTab        = process.env.GOOGLE_SHEET_TAB || 'Contact';
-    const clientEmail     = process.env.GOOGLE_SERVICE_ACCOUNT_EMAIL; // …@…gserviceaccount.com
-    const rawPrivateKey   = process.env.GOOGLE_PRIVATE_KEY || '';
+    // ----- READ BODY --------------------------------------------------------
+    const {
+      full_name = '',
+      email = '',
+      country_code = '',
+      phone = '',
+      message = '',
+      meta = {}
+    } = req.body || {};
 
-    if (!spreadsheetId || !clientEmail || !rawPrivateKey) {
-      throw new Error('Missing env: GOOGLE_SHEET_ID / GOOGLE_SERVICE_ACCOUNT_EMAIL / GOOGLE_PRIVATE_KEY');
-    }
+    // some helpful context
+    const userAgent = meta.userAgent || req.headers['user-agent'] || '';
+    const ip = (req.headers['x-forwarded-for'] || '').split(',')[0] || req.socket?.remoteAddress || '';
+    const page = meta.page || req.headers.referer || '';
+    const referrer = meta.referrer || req.headers.referer || '';
 
-    // IMPORTANT: turn \n into real newlines if the key was pasted as one line
-    const privateKey = rawPrivateKey.replace(/\\n/g, '\n');
-
-    const jwt = new google.auth.JWT({
+    // ----- GOOGLE AUTH ------------------------------------------------------
+    const auth = new google.auth.JWT({
       email: clientEmail,
       key: privateKey,
       scopes: ['https://www.googleapis.com/auth/spreadsheets'],
     });
-    const sheets = google.sheets({ version: 'v4', auth: jwt });
+    const sheets = google.sheets({ version: 'v4', auth });
 
-    // Build the row
-    const full_name    = (body.full_name || '').trim();
-    const email        = (body.email || '').trim();
-    const country_code = (body.country_code || '').trim();
-    const phone        = (body.phone || '').trim();
-    const message      = (body.message || '').trim();
-    const meta         = body.meta || {};
-
-    const ip = (req.headers['x-forwarded-for'] || '').split(',')[0].trim() ||
-               req.socket?.remoteAddress || '';
-    const ua = req.headers['user-agent'] || '';
-
-    const values = [[
-      new Date().toISOString(),   // Timestamp
+    // ----- APPEND ROW -------------------------------------------------------
+    const tab = process.env.GOOGLE_SHEET_TAB || 'Contact';
+    const row = [
+      new Date().toISOString(), // Timestamp
       full_name,
       email,
       message,
-      meta.page || '',
-      meta.referrer || '',
-      '',                         // CID (optional)
-      ip,                         // IP
-      ua,                         // UA
-      JSON.stringify({ country_code, phone, meta }) // Extra
-    ]];
+      page,
+      referrer,
+      `${country_code} ${phone}`.trim(),
+      ip,
+      userAgent,
+      JSON.stringify(meta || {})
+    ];
 
-    // Append
-    const range = `${sheetTab}!A:K`; // assumes your headers are in row 1
-    const result = await sheets.spreadsheets.values.append({
+    await sheets.spreadsheets.values.append({
       spreadsheetId,
-      range,
+      range: `${tab}!A:Z`,
       valueInputOption: 'USER_ENTERED',
-      requestBody: { values }
+      insertDataOption: 'INSERT_ROWS',
+      requestBody: { values: [row] }
     });
 
-    return send(res, 200, {
-      status: 'ok',
-      updates: result.data?.updates,
-    }, ORIGIN);
-
+    return send(res, 200, { ok: true }, origin);
   } catch (err) {
-    console.error('/api/contact error:', err);
-    return send(res, 500, {
-      error: 'Internal error',
-      detail: String(err.message || err),
-      hint: [
-        '• Share the Google Sheet with your service account email (Editor).',
-        '• GOOGLE_PRIVATE_KEY must keep real newlines or use \\n and replace in code.',
-        '• GOOGLE_SHEET_ID must be the ID between /d/ and /edit in the sheet URL.',
-        '• GOOGLE_SHEET_TAB must match the tab name (or change range to the first sheet).',
-      ].join('\n')
-    }, process.env.ALLOWED_ORIGIN || '*');
+    console.error('/api/contact error:', err); // check Vercel → Logs to see the stack
+    return send(res, 500, { error: 'Internal error' }, origin);
   }
 };
