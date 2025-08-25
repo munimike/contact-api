@@ -1,88 +1,80 @@
-// api/contact.js (ESM)
 import { google } from 'googleapis';
+import { GoogleAuth } from 'google-auth-library';
 
-function corsOrigin(req) {
-  const origin = req.headers.origin || '';
-  const allowed = (process.env.ALLOWED_ORIGIN || '*')
-    .split(',')
-    .map(s => s.trim());
-  if (allowed.includes('*') || allowed.includes(origin)) return origin || '*';
-  return allowed[0] || '*';
-}
-
-function send(res, status, body, origin) {
-  res.setHeader('Access-Control-Allow-Origin', origin);
-  res.setHeader('Vary', 'Origin');
-  res.setHeader('Access-Control-Allow-Methods', 'POST,OPTIONS');
-  res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
-  res.setHeader('Access-Control-Max-Age', '86400');
-  res.status(status).json(body);
-}
+const ALLOWED_ORIGINS = ['https://www.mnmkstudio.com']; // add your live site(s)
 
 export default async function handler(req, res) {
-  const origin = corsOrigin(req);
+  // CORS
+  const origin = req.headers.origin;
+  if (ALLOWED_ORIGINS.includes(origin)) res.setHeader('Access-Control-Allow-Origin', origin);
+  res.setHeader('Vary', 'Origin');
+  res.setHeader('Access-Control-Allow-Methods', 'POST, OPTIONS');
+  res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
+  if (req.method === 'OPTIONS') return res.status(204).end();
 
-  if (req.method === 'OPTIONS') return send(res, 204, {}, origin);
-  if (req.method !== 'POST') return send(res, 405, { error: 'Only POST allowed' }, origin);
+  if (req.method !== 'POST') {
+    return res.status(405).json({ error: 'Only POST allowed' });
+  }
 
   try {
-    const spreadsheetId = process.env.GOOGLE_SHEET_ID;
-    const clientEmail   = process.env.GOOGLE_SERVICE_ACCOUNT_EMAIL;
-    let privateKey      = process.env.GOOGLE_PRIVATE_KEY || '';
-
-    if (!spreadsheetId || !clientEmail || !privateKey) {
-      console.error('Missing env var(s):',
-        { hasSheetId: !!spreadsheetId, hasEmail: !!clientEmail, hasKey: !!privateKey });
-      return send(res, 500, { error: 'Internal error' }, origin);
-    }
-
-    // fix \n in env
-    privateKey = privateKey.replace(/\\n/g, '\n');
-
     const {
-      full_name = '', email = '', country_code = '', phone = '', message = '',
-      meta = {}
+      name = '',
+      email = '',
+      message = '',
+      phone = '',
+      referrer = '',
+      cid = '',
+      ip = '',
+      ua = '',
+      extra = '',
+      // simple honeypot to deter bots:
+      website // should be empty; bots often fill it
     } = req.body || {};
 
-    const userAgent = meta.userAgent || req.headers['user-agent'] || '';
-    const ip = (req.headers['x-forwarded-for'] || '').split(',')[0] || req.socket?.remoteAddress || '';
-    const page = meta.page || req.headers.referer || '';
-    const referrer = meta.referrer || req.headers.referer || '';
+    // spam honeypot: if filled, pretend success but do nothing
+    if (website && String(website).trim() !== '') {
+      return res.status(200).json({ status: 'ok' });
+    }
 
-    const auth = new google.auth.JWT({
-      email: clientEmail,
-      key: privateKey,
-      scopes: ['https://www.googleapis.com/auth/spreadsheets'],
+    if (!name || !email || !message) {
+      return res.status(400).json({ error: 'name, phone, email, and message are required' });
+    }
+
+    // Google auth
+    const auth = new GoogleAuth({
+      credentials: JSON.parse(process.env.GOOGLE_SERVICE_ACCOUNT_KEY),
+      scopes: ['https://www.googleapis.com/auth/spreadsheets']
     });
-    const sheets = google.sheets({ version: 'v4', auth });
+    const client = await auth.getClient();
+    const sheets = google.sheets({ version: 'v4', auth: client });
 
-    const tab = process.env.GOOGLE_SHEET_TAB || 'Contact';
-    const row = [
-      new Date().toISOString(), // Timestamp
-      full_name,
-      email,
-      message,
-      page,
-      referrer,
-      `${country_code} ${phone}`.trim(),
-      ip,
-      userAgent,
-      JSON.stringify(meta || {}),
-    ];
+    const spreadsheetId = process.env.CONTACT_SPREADSHEET_ID || process.env.SPREADSHEET_ID;
+    const range = 'Contact!A1'; // tab name must match your sheet
 
     await sheets.spreadsheets.values.append({
       spreadsheetId,
-      range: `${tab}!A:Z`,
-      valueInputOption: 'USER_ENTERED',
+      range,
+      valueInputOption: 'RAW',
       insertDataOption: 'INSERT_ROWS',
-      requestBody: { values: [row] },
+      requestBody: {
+        values: [[
+          new Date().toISOString(),
+          name,
+          email,
+          message,
+          page,
+          referrer,
+          cid,
+          ip,
+          ua,
+          typeof extra === 'object' ? JSON.stringify(extra) : (extra || '')
+        ]]
+      }
     });
 
-    return send(res, 200, { ok: true }, origin);
+    return res.status(200).json({ status: 'success' });
   } catch (err) {
-    console.error('/api/contact error:', err);
-    return send(res, 500, { error: 'Internal error' }, origin);
+    console.error('❌ /api/contact error:', err);
+    return res.status(500).json({ status: 'error', message: err.message });
   }
-  
 }
-
