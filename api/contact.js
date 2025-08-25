@@ -1,3 +1,6 @@
+import { google } from 'googleapis';
+import { GoogleAuth } from 'google-auth-library';
+
 // Node.js (Vercel serverless) — Google Sheets via service account (JWT)
 const { google } = require('googleapis');
 
