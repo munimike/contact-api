@@ -1,5 +1,5 @@
-// api/contact.js
-const { google } = require('googleapis');
+// api/contact.js (ESM)
+import { google } from 'googleapis';
 
 function corsOrigin(req) {
   const origin = req.headers.origin || '';
@@ -7,9 +7,9 @@ function corsOrigin(req) {
     .split(',')
     .map(s => s.trim());
   if (allowed.includes('*') || allowed.includes(origin)) return origin || '*';
-  // fall back to first allowed so browser can see headers
   return allowed[0] || '*';
 }
+
 function send(res, status, body, origin) {
   res.setHeader('Access-Control-Allow-Origin', origin);
   res.setHeader('Vary', 'Origin');
@@ -19,46 +19,36 @@ function send(res, status, body, origin) {
   res.status(status).json(body);
 }
 
-module.exports = async (req, res) => {
+export default async function handler(req, res) {
   const origin = corsOrigin(req);
 
-  // Preflight
   if (req.method === 'OPTIONS') return send(res, 204, {}, origin);
   if (req.method !== 'POST') return send(res, 405, { error: 'Only POST allowed' }, origin);
 
   try {
-    // ----- ENV CHECKS -------------------------------------------------------
     const spreadsheetId = process.env.GOOGLE_SHEET_ID;
-    if (!spreadsheetId) {
-      console.error('Missing env: GOOGLE_SHEET_ID');
-      return send(res, 500, { error: 'Internal error' }, origin);
-    }
-    const clientEmail = process.env.GOOGLE_SERVICE_ACCOUNT_EMAIL;
-    let privateKey = process.env.GOOGLE_PRIVATE_KEY || '';
-    // convert \n escapes to real newlines
-    privateKey = privateKey.replace(/\\n/g, '\n');
-    if (!clientEmail || !privateKey) {
-      console.error('Missing env: GOOGLE_SERVICE_ACCOUNT_EMAIL or GOOGLE_PRIVATE_KEY');
+    const clientEmail   = process.env.GOOGLE_SERVICE_ACCOUNT_EMAIL;
+    let privateKey      = process.env.GOOGLE_PRIVATE_KEY || '';
+
+    if (!spreadsheetId || !clientEmail || !privateKey) {
+      console.error('Missing env var(s):',
+        { hasSheetId: !!spreadsheetId, hasEmail: !!clientEmail, hasKey: !!privateKey });
       return send(res, 500, { error: 'Internal error' }, origin);
     }
 
-    // ----- READ BODY --------------------------------------------------------
+    // fix \n in env
+    privateKey = privateKey.replace(/\\n/g, '\n');
+
     const {
-      full_name = '',
-      email = '',
-      country_code = '',
-      phone = '',
-      message = '',
+      full_name = '', email = '', country_code = '', phone = '', message = '',
       meta = {}
     } = req.body || {};
 
-    // some helpful context
     const userAgent = meta.userAgent || req.headers['user-agent'] || '';
     const ip = (req.headers['x-forwarded-for'] || '').split(',')[0] || req.socket?.remoteAddress || '';
     const page = meta.page || req.headers.referer || '';
     const referrer = meta.referrer || req.headers.referer || '';
 
-    // ----- GOOGLE AUTH ------------------------------------------------------
     const auth = new google.auth.JWT({
       email: clientEmail,
       key: privateKey,
@@ -66,7 +56,6 @@ module.exports = async (req, res) => {
     });
     const sheets = google.sheets({ version: 'v4', auth });
 
-    // ----- APPEND ROW -------------------------------------------------------
     const tab = process.env.GOOGLE_SHEET_TAB || 'Contact';
     const row = [
       new Date().toISOString(), // Timestamp
@@ -78,7 +67,7 @@ module.exports = async (req, res) => {
       `${country_code} ${phone}`.trim(),
       ip,
       userAgent,
-      JSON.stringify(meta || {})
+      JSON.stringify(meta || {}),
     ];
 
     await sheets.spreadsheets.values.append({
@@ -86,12 +75,12 @@ module.exports = async (req, res) => {
       range: `${tab}!A:Z`,
       valueInputOption: 'USER_ENTERED',
       insertDataOption: 'INSERT_ROWS',
-      requestBody: { values: [row] }
+      requestBody: { values: [row] },
     });
 
     return send(res, 200, { ok: true }, origin);
   } catch (err) {
-    console.error('/api/contact error:', err); // check Vercel → Logs to see the stack
+    console.error('/api/contact error:', err);
     return send(res, 500, { error: 'Internal error' }, origin);
   }
-};
+}
