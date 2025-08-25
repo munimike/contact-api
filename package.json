@@ -1,0 +1,9 @@
+{
+  "name": "contact-api",
+  "private": true,
+  "type": "module",
+  "dependencies": {
+    "google-auth-library": "^9.14.2",
+    "googleapis": "^133.0.0"
+  }
+}
