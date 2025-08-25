@@ -3,6 +3,7 @@ import { GoogleAuth } from 'google-auth-library';
 
 // Node.js (Vercel serverless) — Google Sheets via service account (JWT)
 const { google } = require('googleapis');
+const ALLOWED_ORIGINS = ['https://www.mnmkstudio.com']; // add your live site(s)
 
 function send(res, status, body, origin) {
   res.setHeader('Access-Control-Allow-Origin', origin || '*');
