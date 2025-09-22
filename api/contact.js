@@ -60,6 +60,7 @@ export default async function handler(req, res) {
 
     // Try to save to Google Sheets via Google Apps Script
     if (process.env.GOOGLE_APPS_SCRIPT_URL) {
+      console.log('🔗 Attempting to send data to Google Apps Script:', process.env.GOOGLE_APPS_SCRIPT_URL);
       try {
         const response = await fetch(process.env.GOOGLE_APPS_SCRIPT_URL, {
           method: 'POST',
@@ -74,7 +75,10 @@ export default async function handler(req, res) {
           })
         });
 
+        console.log('📡 Google Apps Script response status:', response.status);
         const result = await response.json();
+        console.log('📄 Google Apps Script response:', result);
+        
         if (result.ok) {
           console.log('✅ Contact form saved to Google Sheets via Apps Script');
         } else {
@@ -82,10 +86,12 @@ export default async function handler(req, res) {
         }
       } catch (appsScriptError) {
         console.error('⚠️ Google Apps Script error (non-critical):', appsScriptError.message);
+        console.error('🔍 Full error details:', appsScriptError);
         // Don't fail the request if Google Apps Script fails
       }
     } else {
       console.log('⚠️ Google Apps Script URL not configured - data logged only');
+      console.log('🔍 Available environment variables:', Object.keys(process.env).filter(key => key.includes('GOOGLE')));
     }
 
     return res.status(200).json({ status: 'success' });
