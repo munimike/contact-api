@@ -1,15 +1,24 @@
 import { google } from 'googleapis';
 import { GoogleAuth } from 'google-auth-library';
 
-const ALLOWED_ORIGINS = ['https://www.mnmkstudio.com']; // add your live site(s)
+const ALLOWED_ORIGINS = [
+  'https://www.mnmkstudio.com',
+  'https://mnmkstudio.com',
+  'http://127.0.0.1:8000',
+  'http://localhost:8000'
+];
 
 export default async function handler(req, res) {
   // CORS
   const origin = req.headers.origin;
-  if (ALLOWED_ORIGINS.includes(origin)) res.setHeader('Access-Control-Allow-Origin', origin);
+  if (ALLOWED_ORIGINS.includes(origin)) {
+    res.setHeader('Access-Control-Allow-Origin', origin);
+  }
   res.setHeader('Vary', 'Origin');
   res.setHeader('Access-Control-Allow-Methods', 'POST, OPTIONS');
   res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
+  res.setHeader('Access-Control-Allow-Credentials', 'true');
+  
   if (req.method === 'OPTIONS') return res.status(204).end();
 
   if (req.method !== 'POST') {
@@ -18,15 +27,12 @@ export default async function handler(req, res) {
 
   try {
     const {
-      name = '',
+      full_name = '',
       email = '',
       message = '',
       phone = '',
-      referrer = '',
-      cid = '',
-      ip = '',
-      ua = '',
-      extra = '',
+      country_code = '',
+      meta = {},
       // simple honeypot to deter bots:
       website // should be empty; bots often fill it
     } = req.body || {};
@@ -36,8 +42,8 @@ export default async function handler(req, res) {
       return res.status(200).json({ status: 'ok' });
     }
 
-    if (!name || !email || !message) {
-      return res.status(400).json({ error: 'name, phone, email, and message are required' });
+    if (!full_name || !email || !message) {
+      return res.status(400).json({ error: 'full_name, email, and message are required' });
     }
 
     // Google auth
@@ -51,6 +57,12 @@ export default async function handler(req, res) {
     const spreadsheetId = process.env.CONTACT_SPREADSHEET_ID || process.env.SPREADSHEET_ID;
     const range = 'Contact!A1'; // tab name must match your sheet
 
+    // Combine country code and phone
+    const fullPhone = country_code ? `${country_code} ${phone}` : phone;
+    
+    // Extract page URL from meta object
+    const page = meta?.page || '';
+
     await sheets.spreadsheets.values.append({
       spreadsheetId,
       range,
@@ -59,15 +71,16 @@ export default async function handler(req, res) {
       requestBody: {
         values: [[
           new Date().toISOString(),
-          name,
+          full_name,
           email,
+          fullPhone,
           message,
           page,
-          referrer,
-          cid,
-          ip,
-          ua,
-          typeof extra === 'object' ? JSON.stringify(extra) : (extra || '')
+          meta?.referrer || '',
+          meta?.cid || '',
+          req.headers['x-forwarded-for'] || req.connection.remoteAddress || '',
+          meta?.userAgent || req.headers['user-agent'] || '',
+          typeof meta === 'object' ? JSON.stringify(meta) : (meta || '')
         ]]
       }
     });
