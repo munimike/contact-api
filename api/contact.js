@@ -99,4 +99,4 @@ export default async function handler(req, res) {
     console.error('❌ /api/contact error:', err);
     return res.status(500).json({ status: 'error', message: err.message });
   }
-}
+}// Force deployment Mon Sep 22 18:15:45 PST 2025
