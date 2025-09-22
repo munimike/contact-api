@@ -46,51 +46,21 @@ export default async function handler(req, res) {
       return res.status(400).json({ error: 'full_name, email, and message are required' });
     }
 
-    // Google auth
-    const auth = new GoogleAuth({
-      credentials: JSON.parse(process.env.GOOGLE_SERVICE_ACCOUNT_KEY),
-      scopes: ['https://www.googleapis.com/auth/spreadsheets']
+    // Log the contact form submission
+    console.log('📧 Contact form submission:', {
+      full_name,
+      email,
+      phone: country_code ? `${country_code} ${phone}` : phone,
+      message,
+      page: meta?.page || '',
+      referrer: meta?.referrer || '',
+      userAgent: meta?.userAgent || req.headers['user-agent'] || '',
+      ip: req.headers['x-forwarded-for'] || req.connection.remoteAddress || '',
+      timestamp: new Date().toISOString()
     });
-    const client = await auth.getClient();
-    const sheets = google.sheets({ version: 'v4', auth: client });
 
-    const spreadsheetId = process.env.CONTACT_SPREADSHEET_ID || process.env.SPREADSHEET_ID;
-    const range = 'Contact!A1'; // tab name must match your sheet
-
-    // Combine country code and phone
-    const fullPhone = country_code ? `${country_code} ${phone}` : phone;
-    
-    // Extract page URL from meta object
-    const page = meta?.page || '';
-
-    // Try to save to Google Sheets, but don't fail if it doesn't work
-    try {
-      await sheets.spreadsheets.values.append({
-        spreadsheetId,
-        range,
-        valueInputOption: 'RAW',
-        insertDataOption: 'INSERT_ROWS',
-        requestBody: {
-          values: [[
-            new Date().toISOString(),
-            full_name,
-            email,
-            fullPhone,
-            message,
-            page,
-            meta?.referrer || '',
-            meta?.cid || '',
-            req.headers['x-forwarded-for'] || req.connection.remoteAddress || '',
-            meta?.userAgent || req.headers['user-agent'] || '',
-            typeof meta === 'object' ? JSON.stringify(meta) : (meta || '')
-          ]]
-        }
-      });
-      console.log('✅ Contact form saved to Google Sheets');
-    } catch (sheetsError) {
-      console.error('⚠️ Google Sheets error (non-critical):', sheetsError.message);
-      // Don't fail the request if Google Sheets fails
-    }
+    // TODO: Re-enable Google Sheets integration once credentials are fixed
+    // For now, just log the submission and return success
 
     return res.status(200).json({ status: 'success' });
   } catch (err) {
