@@ -1,5 +1,4 @@
-import { google } from 'googleapis';
-import { GoogleAuth } from 'google-auth-library';
+// Using Google Apps Script instead of Google Sheets API
 
 const ALLOWED_ORIGINS = [
   'https://www.mnmkstudio.com',
@@ -59,8 +58,35 @@ export default async function handler(req, res) {
       timestamp: new Date().toISOString()
     });
 
-    // TODO: Re-enable Google Sheets integration once credentials are fixed
-    // For now, just log the submission and return success
+    // Try to save to Google Sheets via Google Apps Script
+    if (process.env.GOOGLE_APPS_SCRIPT_URL) {
+      try {
+        const response = await fetch(process.env.GOOGLE_APPS_SCRIPT_URL, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/x-www-form-urlencoded',
+          },
+          body: new URLSearchParams({
+            full_name: full_name,
+            email: email,
+            phone: country_code ? `${country_code} ${phone}` : phone,
+            message: message
+          })
+        });
+
+        const result = await response.json();
+        if (result.ok) {
+          console.log('✅ Contact form saved to Google Sheets via Apps Script');
+        } else {
+          console.error('⚠️ Google Apps Script error:', result.error);
+        }
+      } catch (appsScriptError) {
+        console.error('⚠️ Google Apps Script error (non-critical):', appsScriptError.message);
+        // Don't fail the request if Google Apps Script fails
+      }
+    } else {
+      console.log('⚠️ Google Apps Script URL not configured - data logged only');
+    }
 
     return res.status(200).json({ status: 'success' });
   } catch (err) {
