@@ -63,27 +63,34 @@ export default async function handler(req, res) {
     // Extract page URL from meta object
     const page = meta?.page || '';
 
-    await sheets.spreadsheets.values.append({
-      spreadsheetId,
-      range,
-      valueInputOption: 'RAW',
-      insertDataOption: 'INSERT_ROWS',
-      requestBody: {
-        values: [[
-          new Date().toISOString(),
-          full_name,
-          email,
-          fullPhone,
-          message,
-          page,
-          meta?.referrer || '',
-          meta?.cid || '',
-          req.headers['x-forwarded-for'] || req.connection.remoteAddress || '',
-          meta?.userAgent || req.headers['user-agent'] || '',
-          typeof meta === 'object' ? JSON.stringify(meta) : (meta || '')
-        ]]
-      }
-    });
+    // Try to save to Google Sheets, but don't fail if it doesn't work
+    try {
+      await sheets.spreadsheets.values.append({
+        spreadsheetId,
+        range,
+        valueInputOption: 'RAW',
+        insertDataOption: 'INSERT_ROWS',
+        requestBody: {
+          values: [[
+            new Date().toISOString(),
+            full_name,
+            email,
+            fullPhone,
+            message,
+            page,
+            meta?.referrer || '',
+            meta?.cid || '',
+            req.headers['x-forwarded-for'] || req.connection.remoteAddress || '',
+            meta?.userAgent || req.headers['user-agent'] || '',
+            typeof meta === 'object' ? JSON.stringify(meta) : (meta || '')
+          ]]
+        }
+      });
+      console.log('✅ Contact form saved to Google Sheets');
+    } catch (sheetsError) {
+      console.error('⚠️ Google Sheets error (non-critical):', sheetsError.message);
+      // Don't fail the request if Google Sheets fails
+    }
 
     return res.status(200).json({ status: 'success' });
   } catch (err) {
