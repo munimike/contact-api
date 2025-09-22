@@ -1,4 +1,4 @@
-// Using Google Apps Script instead of Google Sheets API
+// Using Google Apps Script instead of Google Sheets API - Updated
 
 const ALLOWED_ORIGINS = [
   'https://www.mnmkstudio.com',
